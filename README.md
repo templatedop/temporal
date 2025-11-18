@@ -40,6 +40,7 @@ Built for production use in insurance, HR, and other complex domains:
 
 - **⚠️ Error Handling** - Structured error types with retry logic and domain-specific errors
 - **📦 Batch Operations** - Bulk terminate, cancel, or signal workflows matching a query
+- **⚙️ DSL/Config Workflows** - Define workflows in YAML/JSON with declarative step configuration
 
 See [FEATURES.md](FEATURES.md) for detailed documentation and examples.
 
@@ -387,6 +388,16 @@ See [examples/nexus/microservices.go](examples/nexus/microservices.go) for micro
 - **Parallel Execution**: Driver assignment runs in parallel with order preparation
 - **Service Decoupling**: Each microservice can be developed and deployed independently
 
+### DSL/Config-Based Workflows
+
+See [examples/dsl/](examples/dsl/) for declarative workflow definitions:
+- **YAML/JSON Workflows**: Define workflows as configuration files instead of code
+- **Step Types**: Activity, parallel, sequential, loop, switch, wait, and signal steps
+- **Variable Resolution**: Reference variables with `$variableName` syntax
+- **Conditional Execution**: Execute steps based on conditions
+- **Error Handling**: Define error handling blocks per workflow
+- **Example Workflows**: Insurance claim routing, HR onboarding, batch processing
+
 ## Architecture
 
 ```
@@ -420,12 +431,16 @@ temporal/
 │   └── errors.go        # Structured errors with retry logic
 ├── batch/               # Batch operations
 │   └── batch.go         # Bulk workflow operations
+├── dsl/                 # DSL/Config workflow engine
+│   ├── workflow.go      # DSL execution engine
+│   └── loader.go        # YAML/JSON parser and builder
 └── examples/            # Example applications
     ├── simple/          # Basic usage examples
     ├── advanced/        # Complex workflow example
     ├── insurance/       # Insurance claims processing
     ├── hr/              # HR performance reviews
-    └── nexus/           # Nexus cross-namespace and microservices examples
+    ├── nexus/           # Nexus cross-namespace and microservices examples
+    └── dsl/             # DSL/Config workflow examples
 ```
 
 ## Quick Start: Enterprise Patterns
@@ -512,6 +527,73 @@ result, err := nexus.CallServiceOperation[PaymentInput, PaymentOutput](
     paymentInput,
     nexus.WithOperationSummary("Process order payment"),
 )
+```
+
+### DSL/Config Workflows
+
+```go
+import "github.com/templatedop/temporal/dsl"
+
+// Load workflow from YAML file
+loader := dsl.NewLoader()
+def, err := loader.LoadFromYAML("insurance_claim_routing.yaml")
+
+// Create activity registry
+registry := dsl.NewActivityRegistry()
+registry.Register("ValidateClaim", ValidateClaimActivity)
+registry.Register("ProcessPayment", ProcessPaymentActivity)
+
+// Execute DSL workflow
+result, err := dsl.ExecuteDefinedWorkflow(ctx, def, registry, input)
+
+// Or build workflows programmatically
+builder := dsl.NewBuilder("my-workflow").
+    WithDescription("Process order").
+    WithTimeout("1h")
+
+builder.AddActivityStep("validate", "ValidateOrder").
+    WithInput(map[string]interface{}{"orderId": "$orderId"}).
+    WithTimeout("30s").
+    WithOutputVar("validationResult").
+    Done()
+
+builder.AddActivityStep("process", "ProcessOrder").
+    WithInput(map[string]interface{}{"orderId": "$orderId"}).
+    WithTimeout("5m").
+    Done()
+
+workflowDef := builder.Build()
+```
+
+**Example YAML workflow:**
+
+```yaml
+name: insurance-claim-routing
+version: "1.0"
+timeout: "2h"
+
+steps:
+  - name: validate-claim
+    type: activity
+    activity: ValidateClaim
+    input:
+      claimId: "$claimId"
+    timeout: "30s"
+    outputVar: "validationResult"
+
+  - name: route-by-type
+    type: switch
+    switch:
+      value: "claimType"
+      cases:
+        "auto":
+          - name: auto-approval
+            type: activity
+            activity: AutoApprove
+        "health":
+          - name: medical-review
+            type: activity
+            activity: MedicalReview
 ```
 
 ## Why Use This Library?

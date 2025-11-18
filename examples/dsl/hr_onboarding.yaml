@@ -1,0 +1,255 @@
+# HR Employee Onboarding Workflow
+# Orchestrates the complete onboarding process for new hires
+
+name: hr-employee-onboarding
+description: Complete onboarding workflow for new employees with department-specific tasks
+version: "2.0"
+timeout: "30d"  # Onboarding can take up to 30 days
+
+steps:
+  # Step 1: Initialize onboarding
+  - name: create-employee-record
+    type: activity
+    activity: CreateEmployeeRecord
+    input:
+      employeeData: "$employeeData"
+      department: "$department"
+      startDate: "$startDate"
+    timeout: "1m"
+    outputVar: "employeeId"
+
+  # Step 2: Background check (parallel with document collection)
+  - name: pre-start-checks
+    type: parallel
+    parallel:
+      - name: background-check
+        type: activity
+        activity: RunBackgroundCheck
+        input:
+          employeeId: "$employeeId"
+          ssn: "$ssn"
+        timeout: "10m"
+        retryPolicy:
+          maxAttempts: 3
+          initialInterval: "1m"
+        outputVar: "backgroundCheckResult"
+
+      - name: collect-documents
+        type: activity
+        activity: RequestDocuments
+        input:
+          employeeId: "$employeeId"
+          documents: ["I9", "W4", "DirectDeposit", "EmergencyContact"]
+        timeout: "5m"
+        outputVar: "documentsRequested"
+
+      - name: setup-accounts
+        type: sequential
+        sequential:
+          - name: create-email
+            type: activity
+            activity: CreateEmailAccount
+            input:
+              employeeId: "$employeeId"
+              firstName: "$firstName"
+              lastName: "$lastName"
+            outputVar: "email"
+
+          - name: create-slack
+            type: activity
+            activity: CreateSlackAccount
+            input:
+              employeeId: "$employeeId"
+              email: "$email"
+            outputVar: "slackId"
+
+  # Step 3: Wait for document submission
+  - name: await-documents
+    type: signal
+    signal:
+      name: "documents-submitted"
+      timeout: "7d"  # Give 7 days to submit documents
+    outputVar: "submittedDocuments"
+
+  # Step 4: Verify documents
+  - name: verify-documents
+    type: loop
+    loop:
+      items: "submittedDocuments"
+      itemVar: "document"
+      indexVar: "docIndex"
+    sequential:
+      - name: verify-document
+        type: activity
+        activity: VerifyDocument
+        input:
+          document: "$document"
+          employeeId: "$employeeId"
+        timeout: "2m"
+
+  # Step 5: Department-specific onboarding
+  - name: department-onboarding
+    type: switch
+    switch:
+      value: "department"
+      cases:
+        "Engineering":
+          - name: dev-environment-setup
+            type: sequential
+            sequential:
+              - name: provision-laptop
+                type: activity
+                activity: ProvisionLaptop
+                input:
+                  employeeId: "$employeeId"
+                  specs: "dev-laptop"
+
+              - name: setup-dev-tools
+                type: activity
+                activity: SetupDevTools
+                input:
+                  employeeId: "$employeeId"
+                  tools: ["github", "jira", "aws"]
+
+              - name: assign-mentor
+                type: activity
+                activity: AssignMentor
+                input:
+                  employeeId: "$employeeId"
+                  department: "Engineering"
+                outputVar: "mentorId"
+
+        "Sales":
+          - name: sales-setup
+            type: sequential
+            sequential:
+              - name: crm-access
+                type: activity
+                activity: GrantCRMAccess
+                input:
+                  employeeId: "$employeeId"
+
+              - name: sales-training
+                type: activity
+                activity: EnrollInTraining
+                input:
+                  employeeId: "$employeeId"
+                  courses: ["sales-101", "product-overview", "crm-training"]
+
+        "HR":
+          - name: hr-setup
+            type: sequential
+            sequential:
+              - name: hris-access
+                type: activity
+                activity: GrantHRISAccess
+                input:
+                  employeeId: "$employeeId"
+                  role: "hr-specialist"
+
+              - name: compliance-training
+                type: activity
+                activity: EnrollInTraining
+                input:
+                  employeeId: "$employeeId"
+                  courses: ["gdpr", "equal-opportunity", "hr-fundamentals"]
+
+      default:
+        - name: general-setup
+          type: activity
+          activity: GeneralOnboarding
+          input:
+            employeeId: "$employeeId"
+            department: "$department"
+
+  # Step 6: First day tasks
+  - name: wait-for-start-date
+    type: wait
+    wait: "$daysUntilStart"  # Calculate from start date
+
+  - name: first-day-tasks
+    type: sequential
+    sequential:
+      - name: office-tour
+        type: activity
+        activity: ScheduleOfficeTour
+        input:
+          employeeId: "$employeeId"
+
+      - name: team-introduction
+        type: activity
+        activity: ScheduleTeamMeeting
+        input:
+          employeeId: "$employeeId"
+          managerId: "$managerId"
+
+      - name: assign-equipment
+        type: activity
+        activity: AssignEquipment
+        input:
+          employeeId: "$employeeId"
+          items: ["laptop", "mouse", "keyboard", "monitor"]
+
+  # Step 7: 30/60/90 day check-ins
+  - name: schedule-checkins
+    type: sequential
+    sequential:
+      - name: wait-30-days
+        type: wait
+        wait: "30d"
+
+      - name: 30-day-checkin
+        type: signal
+        signal:
+          name: "checkin-completed"
+          timeout: "7d"
+        outputVar: "day30Feedback"
+
+      - name: wait-60-days
+        type: wait
+        wait: "30d"
+
+      - name: 60-day-checkin
+        type: signal
+        signal:
+          name: "checkin-completed"
+          timeout: "7d"
+        outputVar: "day60Feedback"
+
+      - name: wait-90-days
+        type: wait
+        wait: "30d"
+
+      - name: 90-day-review
+        type: activity
+        activity: Conduct90DayReview
+        input:
+          employeeId: "$employeeId"
+          day30Feedback: "$day30Feedback"
+          day60Feedback: "$day60Feedback"
+        outputVar: "reviewResult"
+
+  # Step 8: Complete onboarding
+  - name: complete-onboarding
+    type: activity
+    activity: CompleteOnboarding
+    input:
+      employeeId: "$employeeId"
+      reviewResult: "$reviewResult"
+    outputVar: "onboardingComplete"
+
+onError:
+  steps:
+    - name: notify-hr-team
+      type: activity
+      activity: NotifyHRTeam
+      input:
+        employeeId: "$employeeId"
+        error: "$error"
+        step: "$failedStep"
+
+    - name: pause-onboarding
+      type: activity
+      activity: PauseOnboarding
+      input:
+        employeeId: "$employeeId"

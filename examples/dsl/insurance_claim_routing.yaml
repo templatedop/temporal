@@ -1,0 +1,165 @@
+# Insurance Claim Routing Workflow
+# Routes claims based on type and amount through different approval chains
+
+name: insurance-claim-routing
+description: Routes insurance claims through appropriate approval workflow based on claim type and amount
+version: "1.0"
+timeout: "2h"
+
+steps:
+  # Step 1: Validate claim data
+  - name: validate-claim
+    type: activity
+    activity: ValidateClaim
+    input:
+      claimId: "$claimId"
+      claimData: "$claimData"
+    timeout: "30s"
+    retryPolicy:
+      maxAttempts: 3
+      initialInterval: "1s"
+      backoffFactor: 2.0
+    outputVar: "validationResult"
+
+  # Step 2: Determine claim type and route accordingly
+  - name: route-by-claim-type
+    type: switch
+    switch:
+      value: "claimType"
+      cases:
+        "auto":
+          - name: auto-fraud-check
+            type: activity
+            activity: AutoFraudCheck
+            input:
+              claimId: "$claimId"
+            timeout: "1m"
+            outputVar: "fraudScore"
+
+          - name: auto-approval-decision
+            type: switch
+            switch:
+              value: "claimAmount"
+              cases:
+                "high":  # Over $50,000
+                  - name: senior-adjuster-approval
+                    type: signal
+                    signal:
+                      name: "senior-approval"
+                      timeout: "24h"
+                    outputVar: "approvalDecision"
+
+                "medium":  # $10,000 - $50,000
+                  - name: adjuster-approval
+                    type: signal
+                    signal:
+                      name: "adjuster-approval"
+                      timeout: "12h"
+                    outputVar: "approvalDecision"
+
+              default:  # Under $10,000 - auto-approve if fraud score is low
+                - name: auto-approve
+                  type: activity
+                  activity: AutoApprove
+                  condition: "lowFraudRisk"
+                  input:
+                    claimId: "$claimId"
+                    fraudScore: "$fraudScore"
+
+        "home":
+          - name: home-inspection
+            type: activity
+            activity: ScheduleInspection
+            input:
+              claimId: "$claimId"
+              address: "$propertyAddress"
+            timeout: "5m"
+
+          - name: wait-for-inspection
+            type: wait
+            wait: "48h"
+
+          - name: review-inspection
+            type: activity
+            activity: ReviewInspection
+            input:
+              claimId: "$claimId"
+            outputVar: "inspectionResult"
+
+        "health":
+          - name: medical-review
+            type: sequential
+            sequential:
+              - name: check-policy-coverage
+                type: activity
+                activity: CheckCoverage
+                input:
+                  policyId: "$policyId"
+                  procedures: "$procedures"
+                outputVar: "coverageInfo"
+
+              - name: verify-provider
+                type: activity
+                activity: VerifyProvider
+                input:
+                  providerId: "$providerId"
+                outputVar: "providerVerified"
+
+              - name: calculate-benefits
+                type: activity
+                activity: CalculateBenefits
+                input:
+                  coverageInfo: "$coverageInfo"
+                  claimAmount: "$claimAmount"
+                outputVar: "benefitsAmount"
+
+      default:
+        - name: manual-review
+          type: activity
+          activity: QueueForManualReview
+          input:
+            claimId: "$claimId"
+            reason: "Unknown claim type"
+
+  # Step 3: Process payment if approved
+  - name: process-payment
+    type: activity
+    activity: ProcessPayment
+    condition: "approvalDecision"
+    input:
+      claimId: "$claimId"
+      amount: "$benefitsAmount"
+    timeout: "2m"
+    retryPolicy:
+      maxAttempts: 5
+      initialInterval: "5s"
+      maxInterval: "1m"
+    outputVar: "paymentResult"
+
+  # Step 4: Send notification
+  - name: notify-customer
+    type: activity
+    activity: SendNotification
+    input:
+      customerId: "$customerId"
+      claimId: "$claimId"
+      status: "$finalStatus"
+      paymentInfo: "$paymentResult"
+    timeout: "30s"
+
+# Error handler - executed if any step fails
+onError:
+  steps:
+    - name: log-error
+      type: activity
+      activity: LogError
+      input:
+        claimId: "$claimId"
+        error: "$error"
+
+    - name: notify-supervisor
+      type: activity
+      activity: NotifySupervisor
+      input:
+        claimId: "$claimId"
+        error: "$error"

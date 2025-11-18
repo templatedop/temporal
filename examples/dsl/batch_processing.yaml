@@ -1,0 +1,97 @@
+# Batch Processing Workflow with Loop
+# Processes a batch of items with parallel execution within loop
+
+name: batch-invoice-processing
+description: Process monthly invoices in batches with parallel processing
+version: "1.0"
+timeout: "6h"
+
+steps:
+  # Step 1: Fetch invoices for the month
+  - name: fetch-invoices
+    type: activity
+    activity: FetchMonthlyInvoices
+    input:
+      month: "$month"
+      year: "$year"
+    timeout: "5m"
+    outputVar: "invoices"
+
+  # Step 2: Process invoices in batches
+  - name: process-batches
+    type: loop
+    loop:
+      items: "invoiceBatches"  # Batches of 100 invoices each
+      itemVar: "batch"
+      indexVar: "batchIndex"
+      maxIterations: 1000  # Max 100,000 invoices
+    sequential:
+      - name: log-batch-start
+        type: activity
+        activity: LogBatchStart
+        input:
+          batchIndex: "$batchIndex"
+          batchSize: "$batchSize"
+
+      # Process each batch in parallel
+      - name: process-batch-parallel
+        type: parallel
+        parallel:
+          - name: validate-invoices
+            type: activity
+            activity: ValidateInvoices
+            input:
+              invoices: "$batch"
+            timeout: "2m"
+            outputVar: "validationResults"
+
+          - name: calculate-totals
+            type: activity
+            activity: CalculateTotals
+            input:
+              invoices: "$batch"
+            timeout: "1m"
+            outputVar: "totals"
+
+          - name: check-duplicates
+            type: activity
+            activity: CheckDuplicates
+            input:
+              invoices: "$batch"
+            timeout: "1m"
+            outputVar: "duplicates"
+
+      - name: update-records
+        type: activity
+        activity: UpdateInvoiceRecords
+        input:
+          batch: "$batch"
+          validationResults: "$validationResults"
+          totals: "$totals"
+        timeout: "3m"
+
+      # Wait between batches to avoid overwhelming the system
+      - name: batch-delay
+        type: wait
+        wait: "5s"
+
+  # Step 3: Generate summary report
+  - name: generate-report
+    type: activity
+    activity: GenerateSummaryReport
+    input:
+      month: "$month"
+      year: "$year"
+      totalProcessed: "$totalProcessed"
+    timeout: "2m"
+    outputVar: "reportUrl"
+
+  # Step 4: Notify completion
+  - name: send-completion-email
+    type: activity
+    activity: SendEmail
+    input:
+      recipient: "$managerEmail"
+      subject: "Invoice Processing Complete"
+      body: "Processed invoices for $month $year. Report: $reportUrl"
+    timeout: "30s"
