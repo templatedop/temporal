@@ -36,6 +36,11 @@ Built for production use in insurance, HR, and other complex domains:
 - **🔀 Versioning Helpers** - Safe workflow evolution and backward compatibility
 - **🌐 Nexus Integration** - Cross-namespace and microservices orchestration with Temporal Nexus
 
+### Production Utilities
+
+- **⚠️ Error Handling** - Structured error types with retry logic and domain-specific errors
+- **📦 Batch Operations** - Bulk terminate, cancel, or signal workflows matching a query
+
 See [FEATURES.md](FEATURES.md) for detailed documentation and examples.
 
 ## Why This Library vs IWF?
@@ -411,6 +416,10 @@ temporal/
 │   └── simple.go        # Workflow versioning utilities
 ├── nexus/               # Nexus integration
 │   └── service.go       # Nexus service and client helpers
+├── errors/              # Error handling patterns
+│   └── errors.go        # Structured errors with retry logic
+├── batch/               # Batch operations
+│   └── batch.go         # Bulk workflow operations
 └── examples/            # Example applications
     ├── simple/          # Basic usage examples
     ├── advanced/        # Complex workflow example
