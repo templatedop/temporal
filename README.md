@@ -34,6 +34,7 @@ Built for production use in insurance, HR, and other complex domains:
 - **🔄 Continue-As-New Helpers** - Manage long-running workflows (months/years) with automatic history management
 - **📝 Workflow Updates** - Real-time updates to running workflows with type-safe validation
 - **🔀 Versioning Helpers** - Safe workflow evolution and backward compatibility
+- **🌐 Nexus Integration** - Cross-namespace and microservices orchestration with Temporal Nexus
 
 See [FEATURES.md](FEATURES.md) for detailed documentation and examples.
 
@@ -365,6 +366,22 @@ See [examples/hr/performance_review.go](examples/hr/performance_review.go) for l
 - **Pagination**: Processing 100+ onboarding tasks with automatic continuation
 - **Periodic Execution**: Weekly review collection with automatic state management
 
+### Nexus Cross-Namespace Communication
+
+See [examples/nexus/cross_namespace.go](examples/nexus/cross_namespace.go) for cross-namespace orchestration:
+- **Cross-Namespace Calls**: Order Service (namespace: orders) calls Payment Service (namespace: payments)
+- **Service Isolation**: Each service runs in its own namespace with independent scaling
+- **Type-Safe Operations**: Strongly-typed inputs and outputs with Go generics
+- **Endpoint Configuration**: Nexus endpoints for service discovery
+
+### Nexus Microservices Orchestration
+
+See [examples/nexus/microservices.go](examples/nexus/microservices.go) for microservices patterns:
+- **Distributed Services**: Restaurant, Delivery, and Notification services as independent microservices
+- **Central Orchestration**: Food delivery workflow coordinates all services
+- **Parallel Execution**: Driver assignment runs in parallel with order preparation
+- **Service Decoupling**: Each microservice can be developed and deployed independently
+
 ## Architecture
 
 ```
@@ -392,11 +409,14 @@ temporal/
 │   └── continueasnew.go # Continue-as-new patterns
 ├── versioning/          # Versioning helpers
 │   └── simple.go        # Workflow versioning utilities
+├── nexus/               # Nexus integration
+│   └── service.go       # Nexus service and client helpers
 └── examples/            # Example applications
     ├── simple/          # Basic usage examples
     ├── advanced/        # Complex workflow example
     ├── insurance/       # Insurance claims processing
-    └── hr/              # HR performance reviews
+    ├── hr/              # HR performance reviews
+    └── nexus/           # Nexus cross-namespace and microservices examples
 ```
 
 ## Quick Start: Enterprise Patterns
@@ -467,6 +487,22 @@ if version == 2 {
     // Legacy processing for old workflows
     result = processV1(ctx, data)
 }
+```
+
+### Nexus (Cross-Namespace & Microservices)
+
+```go
+import "github.com/templatedop/temporal/nexus"
+
+// Call a service operation in another namespace
+result, err := nexus.CallServiceOperation[PaymentInput, PaymentOutput](
+    ctx,
+    "payment-endpoint",   // Nexus endpoint name
+    "payment-service",    // Service name
+    "process-payment",    // Operation name
+    paymentInput,
+    nexus.WithOperationSummary("Process order payment"),
+)
 ```
 
 ## Why Use This Library?

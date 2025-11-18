@@ -523,7 +523,229 @@ func collectReviewsV2(ctx workflow.Context, state ReviewState) ReviewState {
 
 ---
 
-## 5. Better Persistence Queries
+## 5. Nexus Integration
+
+Temporal Nexus enables cross-namespace and cross-cluster workflow orchestration, allowing services to call each other's workflows as operations.
+
+### What is Nexus?
+
+Nexus is Temporal's solution for:
+- **Cross-namespace communication**: Call workflows in different namespaces
+- **Microservices orchestration**: Build distributed systems with independent services
+- **Service-to-service communication**: RPC-style workflow invocation
+- **Multi-region workflows**: Coordinate across Temporal clusters
+
+### Features
+
+- Fluent Nexus client for calling operations from workflows
+- Easy Nexus service registration with workers
+- Type-safe operation definitions using Go generics
+- Cross-namespace workflow orchestration
+- Microservices patterns
+
+### Calling Nexus Operations from Workflows
+
+**Simple Operation Call:**
+```go
+import "github.com/templatedop/temporal/nexus"
+
+// Call an operation in another namespace/service
+result, err := nexus.CallServiceOperation[PaymentInput, PaymentOutput](
+    ctx,
+    "payment-endpoint",     // Nexus endpoint name
+    "payment-service",      // Service name
+    "process-payment",      // Operation name
+    paymentInput,
+    nexus.WithOperationSummary("Process payment for order"),
+)
+```
+
+**Using Nexus Client:**
+```go
+// Create a reusable client for a service
+client := nexus.NewClient("payment-endpoint", "payment-service")
+
+// Execute operation synchronously
+var result PaymentOutput
+err := client.ExecuteOperationSync(
+    ctx,
+    "process-payment",
+    paymentInput,
+    &result,
+    nexus.WithScheduleToCloseTimeout(30*time.Second),
+)
+```
+
+**With Options:**
+```go
+result, err := nexus.CallServiceOperation[Input, Output](
+    ctx,
+    endpoint,
+    service,
+    operation,
+    input,
+    nexus.WithScheduleToCloseTimeout(5*time.Minute),
+    nexus.WithOperationSummary("Custom operation summary"),
+)
+```
+
+### Registering Nexus Services
+
+**Creating a Nexus Service:**
+```go
+import (
+    "github.com/nexus-rpc/sdk-go/nexus"
+    temporalworker "github.com/templatedop/temporal/worker"
+)
+
+// Create service
+service := nexus.NewService("payment-service")
+
+// Define operations
+processPaymentOp := nexus.NewSyncOperation(
+    "process-payment",
+    func(ctx context.Context, input PaymentInput, opts nexus.StartOperationOptions) (PaymentOutput, error) {
+        // Process payment logic
+        return PaymentOutput{
+            TransactionID: "TXN-123",
+            Status:        "completed",
+        }, nil
+    },
+)
+
+// Register with worker
+w, _ := temporalworker.NewBuilder(client, "payment-tasks").
+    RegisterNexusService(service).
+    Build()
+```
+
+**Fluent Service Registration:**
+```go
+w, _ := temporalworker.NewBuilder(client, "task-queue").
+    RegisterWorkflow(MyWorkflow).
+    RegisterActivity(MyActivity).
+    RegisterNexusService(myNexusService).
+    WithLogging(true).
+    Build()
+```
+
+### Cross-Namespace Example
+
+**Scenario:** Order Service (namespace: `orders`) calls Payment Service (namespace: `payments`)
+
+**Payment Service (namespace: payments):**
+```go
+func ProcessPayment(ctx context.Context, input PaymentInput) (PaymentOutput, error) {
+    // Payment processing logic
+    return PaymentOutput{
+        TransactionID: generateTxnID(),
+        Status:        "completed",
+    }, nil
+}
+
+// Register in payments namespace
+paymentService := nexus.NewService("payment-service")
+w, _ := temporalworker.NewBuilder(paymentsClient, "payment-tasks").
+    RegisterNexusService(paymentService).
+    Build()
+```
+
+**Order Service (namespace: orders):**
+```go
+func OrderWorkflow(ctx workflow.Context, order OrderInput) (OrderOutput, error) {
+    // Call Payment Service in different namespace via Nexus
+    paymentResult, err := nexus.CallServiceOperation[PaymentInput, PaymentOutput](
+        ctx,
+        "payment-endpoint",   // Configured Nexus endpoint
+        "payment-service",
+        "process-payment",
+        PaymentInput{
+            OrderID: order.OrderID,
+            Amount:  order.TotalAmount,
+        },
+    )
+
+    if err != nil {
+        return OrderOutput{}, err
+    }
+
+    return OrderOutput{
+        OrderID:       order.OrderID,
+        TransactionID: paymentResult.TransactionID,
+        Status:        "completed",
+    }, nil
+}
+```
+
+### Microservices Orchestration Example
+
+**Scenario:** Food delivery system with independent microservices
+
+```go
+// Restaurant Service - prepares food
+func PrepareOrder(ctx context.Context, input PrepareInput) (PrepareOutput, error) {
+    return PrepareOutput{EstimatedTime: 20}, nil
+}
+
+// Delivery Service - assigns driver
+func AssignDriver(ctx context.Context, input DriverInput) (DriverOutput, error) {
+    return DriverOutput{DriverID: "DRV-123", ETA: 30}, nil
+}
+
+// Notification Service - sends updates
+func SendNotification(ctx context.Context, input NotifInput) (NotifOutput, error) {
+    return NotifOutput{Status: "sent"}, nil
+}
+
+// Orchestrator Workflow - coordinates all services
+func FoodDeliveryWorkflow(ctx workflow.Context, order OrderInput) (OrderOutput, error) {
+    // Call Restaurant Service
+    prepResult, _ := nexus.CallServiceOperation[PrepareInput, PrepareOutput](
+        ctx, "restaurant-endpoint", "restaurant-service", "prepare-order", prepInput,
+    )
+
+    // Call Delivery Service (in parallel with preparation)
+    driverResult, _ := nexus.CallServiceOperation[DriverInput, DriverOutput](
+        ctx, "delivery-endpoint", "delivery-service", "assign-driver", driverInput,
+    )
+
+    // Call Notification Service
+    _, _ = nexus.CallServiceOperation[NotifInput, NotifOutput](
+        ctx, "notification-endpoint", "notification-service", "send-notification", notifInput,
+    )
+
+    return OrderOutput{
+        OrderID:  order.OrderID,
+        Status:   "out_for_delivery",
+        DriverID: driverResult.DriverID,
+    }, nil
+}
+```
+
+### Use Cases
+
+- **Multi-tenant Systems**: Each tenant in separate namespace, shared services via Nexus
+- **Microservices**: Independent services with workflow-based communication
+- **Cross-Region**: Workflows coordinating across geographic regions
+- **Service Isolation**: Development teams can deploy independently
+- **Gradual Migration**: Move services between namespaces without breaking callers
+
+### Benefits
+
+| Aspect | Benefit |
+|--------|---------|
+| **Namespace Isolation** | Services can't directly access other namespaces' state |
+| **Independent Scaling** | Each service scales based on its own load |
+| **Team Autonomy** | Teams can deploy services independently |
+| **Type Safety** | Compile-time checking with Go generics |
+| **Versioning** | Each service can version its operations independently |
+| **Discovery** | Nexus endpoints provide service discovery |
+
+See: `examples/nexus/cross_namespace.go` and `examples/nexus/microservices.go`
+
+---
+
+## 6. Better Persistence Queries
 
 Fluent query API with pagination and filtering.
 
@@ -622,6 +844,7 @@ count, err := query.CountWorkflows(ctx, c, "OrderWorkflow", "Running")
 | **Workflow Updates** | ✅ Yes | ✅ Yes (type-safe with generics) |
 | **Continue-As-New** | ✅ Yes | ✅ Yes (periodic, paginated, manual) |
 | **Versioning** | ✅ Yes | ✅ Yes (safe evolution helpers) |
+| **Nexus Integration** | ❌ No | ✅ Yes (cross-namespace, microservices orchestration) |
 
 ### When to Use IWF vs This Library
 

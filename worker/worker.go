@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/nexus-rpc/sdk-go/nexus"
 	"go.temporal.io/sdk/worker"
 
 	temporalClient "github.com/templatedop/temporal/client"
@@ -77,6 +78,21 @@ func (w *Worker) RegisterActivity(activityFunc interface{}) {
 	w.underlying.RegisterActivity(activityFunc)
 }
 
+// RegisterNexusService registers a Nexus service with the worker
+func (w *Worker) RegisterNexusService(service *nexus.Service) {
+	// Cast to NexusServiceRegistry interface if supported
+	if registry, ok := w.underlying.(worker.NexusServiceRegistry); ok {
+		registry.RegisterNexusService(service)
+		if w.config.EnableLogging {
+			log.Printf("Registered Nexus service: %s", service.Name)
+		}
+	} else {
+		if w.config.EnableLogging {
+			log.Printf("Warning: Worker does not support Nexus service registration")
+		}
+	}
+}
+
 // Start starts the worker
 func (w *Worker) Start() error {
 	if w.config.EnableLogging {
@@ -126,19 +142,21 @@ func (w *Worker) Run(ctx context.Context) error {
 
 // Builder provides a fluent interface for building workers
 type Builder struct {
-	client     *temporalClient.Client
-	config     *Config
-	workflows  []interface{}
-	activities []interface{}
+	client        *temporalClient.Client
+	config        *Config
+	workflows     []interface{}
+	activities    []interface{}
+	nexusServices []*nexus.Service
 }
 
 // NewBuilder creates a new worker builder
 func NewBuilder(client *temporalClient.Client, taskQueue string) *Builder {
 	return &Builder{
-		client:     client,
-		config:     DefaultConfig(taskQueue),
-		workflows:  make([]interface{}, 0),
-		activities: make([]interface{}, 0),
+		client:        client,
+		config:        DefaultConfig(taskQueue),
+		workflows:     make([]interface{}, 0),
+		activities:    make([]interface{}, 0),
+		nexusServices: make([]*nexus.Service, 0),
 	}
 }
 
@@ -172,6 +190,12 @@ func (b *Builder) RegisterActivity(activityFunc interface{}) *Builder {
 	return b
 }
 
+// RegisterNexusService adds a Nexus service to be registered
+func (b *Builder) RegisterNexusService(service *nexus.Service) *Builder {
+	b.nexusServices = append(b.nexusServices, service)
+	return b
+}
+
 // Build creates the worker with all registered workflows and activities
 func (b *Builder) Build() (*Worker, error) {
 	w, err := New(b.client, b.config)
@@ -187,6 +211,11 @@ func (b *Builder) Build() (*Worker, error) {
 	// Register all activities
 	for _, act := range b.activities {
 		w.RegisterActivity(act)
+	}
+
+	// Register all Nexus services
+	for _, service := range b.nexusServices {
+		w.RegisterNexusService(service)
 	}
 
 	return w, nil
