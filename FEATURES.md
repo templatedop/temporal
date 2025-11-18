@@ -257,7 +257,273 @@ err := client.SignalWorkflow(ctx, workflowID, "", "approval", approval)
 
 ---
 
-## 4. Better Persistence Queries
+## 4. Enterprise Workflow Patterns
+
+Production-ready patterns for complex business workflows in insurance, HR, and other domains requiring long-running processes, parallel execution, and safe evolution.
+
+### Child Workflow Patterns
+
+Execute and coordinate multiple child workflows with various patterns.
+
+#### Fan-Out/Fan-In
+
+Process multiple items in parallel with concurrency control and error handling strategies.
+
+**Features:**
+- Parallel execution with concurrency limits
+- Error handling strategies (fail-fast, continue on error, require all)
+- Per-child timeouts
+- Result aggregation
+
+**Example:**
+```go
+import "github.com/templatedop/temporal/patterns/child"
+
+// Verify 100 documents in parallel, max 10 concurrent
+fanout := child.NewFanOutFanIn[string, VerificationResult](VerifyDocumentWorkflow).
+    WithConcurrency(10).
+    WithErrorHandling(child.ContinueOnError).
+    WithTimeoutPerChild(300). // 5 minutes per document
+    Execute(ctx, documentIDs)
+
+result, err := fanout.Execute(ctx, documentIDs)
+fmt.Printf("Success: %d/%d, Failed: %d/%d\n",
+    result.Successful, len(documentIDs),
+    result.Failed, len(documentIDs))
+```
+
+#### Sequential Pipeline
+
+Execute child workflows one after another, optionally piping output to next input.
+
+**Example:**
+```go
+sequential := child.NewSequential[ClaimData, ClaimData]().
+    AddWorkflow(FraudDetectionWorkflow).
+    AddWorkflow(MedicalAssessmentWorkflow).
+    AddWorkflow(FinalApprovalWorkflow).
+    AsPipeline(true). // Output of one becomes input of next
+    Build()
+
+result, err := sequential.Execute(ctx, claimData)
+fmt.Printf("Final result: %+v\n", result.Final)
+```
+
+**Use Cases:**
+- Insurance: Parallel document verification, sequential claim assessment
+- HR: Parallel background checks, sequential interview stages
+- Finance: Parallel fraud checks, sequential approval tiers
+- E-commerce: Parallel inventory checks, sequential payment processing
+
+### Workflow Updates
+
+Real-time updates to running workflows with type-safe validation.
+
+**Features:**
+- Type-safe update handlers using Go generics
+- Validation before applying updates
+- Synchronous updates with immediate response
+- Version-aware updates
+
+**Inside Workflow:**
+```go
+import "github.com/templatedop/temporal/updates"
+
+// Register update handler with validation
+err := updates.Register[ClaimUpdate, string](ctx, "updateClaimStatus",
+    func(ctx workflow.Context, update ClaimUpdate) (string, error) {
+        // Validate update
+        if update.NewStatus == "" {
+            return "", fmt.Errorf("status cannot be empty")
+        }
+
+        // Apply update
+        claim.Status = update.NewStatus
+        claim.LastUpdated = workflow.Now(ctx)
+        claim.UpdatedBy = update.AdjusterID
+
+        return "Status updated successfully", nil
+    })
+```
+
+**From Client:**
+```go
+// Send synchronous update
+result, err := updates.ExecuteUpdate[ClaimUpdate, string](
+    ctx, client, workflowID, "", "updateClaimStatus",
+    ClaimUpdate{
+        NewStatus:  "approved",
+        AdjusterID: "ADJ-123",
+        Comment:    "All documents verified",
+    })
+
+fmt.Println(result) // "Status updated successfully"
+```
+
+**Insurance-Specific Updates:**
+```go
+// Predefined update types
+updates.ClaimUpdate       // Update claim status
+updates.PolicyUpdate      // Update policy details
+```
+
+**Use Cases:**
+- Insurance: Adjuster updates claim status in real-time
+- HR: Manager updates candidate interview feedback
+- Finance: Risk team updates transaction risk scores
+- Customer Service: Agent updates ticket priority
+
+### Continue-As-New Helpers
+
+Manage long-running workflows (months/years) without hitting history size limits.
+
+#### Periodic Workflow
+
+Run tasks periodically with automatic continue-as-new between iterations.
+
+**Features:**
+- Automatic continue-as-new after each period
+- State preservation across continuations
+- Configurable intervals and max runs
+- Safe for workflows running months/years
+
+**Example:**
+```go
+import "github.com/templatedop/temporal/continueasnew"
+
+func AnnualReviewWorkflow(
+    ctx workflow.Context,
+    state continueasnew.PeriodicState[ReviewState],
+) (continueasnew.PeriodicState[ReviewState], error) {
+
+    // Create periodic manager
+    periodic := continueasnew.NewPeriodicWorkflow[ReviewState](
+        AnnualReviewWorkflow,
+        7*24*3600, // Run weekly
+    ).WithMaxRuns(52) // 52 weeks = 1 year
+
+    // Task to run each period
+    task := func(ctx workflow.Context, state ReviewState) (ReviewState, error) {
+        // Collect reviews for this week
+        state.WeeklyReviews = collectReviews(ctx, state.EmployeeID)
+        state.TotalReviews += len(state.WeeklyReviews)
+        return state, nil
+    }
+
+    return periodic.RunPeriodic(ctx, state, task)
+}
+```
+
+#### Paginated Processing
+
+Process large batches with automatic continue-as-new between batches.
+
+**Example:**
+```go
+// Process 10,000 onboarding tasks in batches of 100
+processor := continueasnew.NewPaginatedProcessor[string, TaskState](
+    OnboardingWorkflow,
+    func(ctx workflow.Context, batch []string, state TaskState) (TaskState, error) {
+        // Process batch
+        for _, task := range batch {
+            state.Completed[task] = processTask(ctx, task)
+        }
+        return state, nil
+    },
+).WithBatchSize(100).WithMaxBatchesPerRun(5)
+
+result, err := processor.Process(ctx, allTasks, initialState)
+```
+
+#### Continue-As-New Manager
+
+Manual control over when to continue as new based on iterations or history size.
+
+**Example:**
+```go
+manager := continueasnew.NewContinueAsNewManager[State](MyWorkflow).
+    WithMaxIterations(1000).
+    WithMaxHistorySize(10000)
+
+for {
+    // Check if should continue as new
+    if manager.ShouldContinue(ctx, iterationCount) {
+        return state, manager.Continue(ctx, state)
+    }
+
+    // Do work
+    state = doWork(ctx, state)
+    iterationCount++
+}
+```
+
+**Use Cases:**
+- HR: Annual performance reviews (52 weeks)
+- Insurance: Multi-year policy management
+- Subscriptions: Monthly billing for years
+- IoT: Continuous sensor data processing
+
+### Versioning Helpers
+
+Safe workflow evolution with backward compatibility.
+
+**Features:**
+- Workflow versioning using Temporal's GetVersion
+- Safe migration from old to new code paths
+- Support for multiple versions in flight
+
+**Example:**
+```go
+import "go.temporal.io/sdk/workflow"
+
+// Safe evolution from V1 to V2
+version := workflow.GetVersion(ctx, "review-process-v2", workflow.DefaultVersion, 2)
+
+if version == 2 {
+    // New enhanced processing with weighted scores
+    state = collectReviewsV2(ctx, state)
+} else {
+    // Legacy processing for existing workflows
+    state = collectReviewsV1(ctx, state)
+}
+```
+
+**V1 Implementation:**
+```go
+func collectReviewsV1(ctx workflow.Context, state ReviewState) ReviewState {
+    // Simple average calculation
+    total := 0.0
+    for _, review := range reviews {
+        total += review.Score
+    }
+    state.AverageScore = total / float64(len(reviews))
+    return state
+}
+```
+
+**V2 Implementation:**
+```go
+func collectReviewsV2(ctx workflow.Context, state ReviewState) ReviewState {
+    // Enhanced with recency weighting
+    total := 0.0
+    for i, review := range reviews {
+        weight := 1.0 + (float64(i) * 0.1) // More recent = higher weight
+        total += review.Score * weight
+    }
+    state.AverageScore = total / float64(len(reviews))
+    return state
+}
+```
+
+**Use Cases:**
+- Evolving business logic without breaking running workflows
+- A/B testing workflow changes
+- Gradual rollout of new features
+- Maintaining backward compatibility
+
+---
+
+## 5. Better Persistence Queries
 
 Fluent query API with pagination and filtering.
 
@@ -352,6 +618,10 @@ count, err := query.CountWorkflows(ctx, c, "OrderWorkflow", "Running")
 | **Saga Pattern** | ✅ Yes | ✅ Yes |
 | **Approval Pattern** | ✅ Yes | ✅ Yes |
 | **Query API** | ✅ Yes | ✅ Yes (fluent builder) |
+| **Child Workflows** | ✅ Yes | ✅ Yes (fan-out/fan-in, sequential, coordination) |
+| **Workflow Updates** | ✅ Yes | ✅ Yes (type-safe with generics) |
+| **Continue-As-New** | ✅ Yes | ✅ Yes (periodic, paginated, manual) |
+| **Versioning** | ✅ Yes | ✅ Yes (safe evolution helpers) |
 
 ### When to Use IWF vs This Library
 

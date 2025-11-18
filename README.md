@@ -26,6 +26,15 @@ A convenient, ergonomic wrapper library for the official Temporal Go SDK that pr
 - **✅ Approval Workflows** - Human-in-the-loop with timeouts and reminders
 - **🔍 Better Queries** - Fluent API for workflow persistence queries with pagination
 
+### Enterprise Workflow Patterns
+
+Built for production use in insurance, HR, and other complex domains:
+
+- **👥 Child Workflow Patterns** - Fan-out/fan-in, sequential pipelines, parent-child coordination
+- **🔄 Continue-As-New Helpers** - Manage long-running workflows (months/years) with automatic history management
+- **📝 Workflow Updates** - Real-time updates to running workflows with type-safe validation
+- **🔀 Versioning Helpers** - Safe workflow evolution and backward compatibility
+
 See [FEATURES.md](FEATURES.md) for detailed documentation and examples.
 
 ## Why This Library vs IWF?
@@ -323,6 +332,14 @@ See [examples/simple/main.go](examples/simple/main.go) for a basic greeting work
 - Simple workflow and activity
 - Workflow execution with fluent builder
 
+### RPC-Style Example
+
+See [examples/simple/rpc_example.go](examples/simple/rpc_example.go) for type-safe workflow execution:
+- `ExecuteTypedWorkflow` - Synchronous RPC-like execution
+- `ExecuteTypedWorkflowAsync` - Asynchronous with typed handle
+- `CallWorkflow` - High-level abstraction
+- `WorkflowStub` - Reusable workflow stubs
+
 ### Advanced Example
 
 See [examples/advanced/main.go](examples/advanced/main.go) for a complex order processing workflow that demonstrates:
@@ -332,22 +349,124 @@ See [examples/advanced/main.go](examples/advanced/main.go) for a complex order p
 - Activity retry policies
 - Compensating transactions (refunds)
 
+### Insurance Claims Processing
+
+See [examples/insurance/claims_workflow.go](examples/insurance/claims_workflow.go) for enterprise-grade claims processing:
+- **Child Workflows**: Fan-out/fan-in for parallel document verification
+- **Sequential Pipelines**: Fraud detection → Medical assessment → Final approval
+- **Workflow Updates**: Real-time claim status updates from adjusters
+- **Saga Pattern**: Automatic rollback if claim processing fails
+
+### HR Performance Reviews
+
+See [examples/hr/performance_review.go](examples/hr/performance_review.go) for long-running HR workflows:
+- **Continue-As-New**: Annual review running for 52 weeks without history size issues
+- **Versioning**: Safe evolution from V1 to V2 review collection
+- **Pagination**: Processing 100+ onboarding tasks with automatic continuation
+- **Periodic Execution**: Weekly review collection with automatic state management
+
 ## Architecture
 
 ```
 temporal/
-├── client/          # Client wrapper and workflow operations
-│   ├── client.go    # Client creation and configuration
-│   └── workflow.go  # Workflow execution and management
-├── worker/          # Worker management
-│   └── worker.go    # Worker builder and lifecycle
-├── workflow/        # Workflow utilities
-│   └── builder.go   # Fluent workflow options builder
-├── testing/         # Testing helpers
-│   └── testing.go   # Workflow and activity test utilities
-└── examples/        # Example applications
-    ├── simple/      # Basic usage example
-    └── advanced/    # Complex workflow example
+├── client/              # Client wrapper and workflow operations
+│   ├── client.go        # Client creation and configuration
+│   ├── workflow.go      # Workflow execution and management
+│   └── rpc.go           # Type-safe RPC-like workflow interface
+├── worker/              # Worker management
+│   └── worker.go        # Worker builder and lifecycle
+├── workflow/            # Workflow utilities
+│   └── builder.go       # Fluent workflow options builder
+├── testing/             # Testing helpers
+│   └── testing.go       # Workflow and activity test utilities
+├── patterns/            # Workflow patterns
+│   ├── saga.go          # Saga pattern with compensations
+│   ├── approval.go      # Human-in-the-loop approvals
+│   └── child/           # Child workflow patterns
+│       └── child.go     # Fan-out/fan-in, sequential, coordination
+├── statemachine/        # State machine abstraction
+│   └── statemachine.go  # State machine workflow builder
+├── updates/             # Workflow updates support
+│   └── updates.go       # Type-safe workflow updates
+├── continueasnew/       # Long-running workflow helpers
+│   └── continueasnew.go # Continue-as-new patterns
+├── versioning/          # Versioning helpers
+│   └── simple.go        # Workflow versioning utilities
+└── examples/            # Example applications
+    ├── simple/          # Basic usage examples
+    ├── advanced/        # Complex workflow example
+    ├── insurance/       # Insurance claims processing
+    └── hr/              # HR performance reviews
+```
+
+## Quick Start: Enterprise Patterns
+
+### Child Workflow Patterns (Fan-Out/Fan-In)
+
+```go
+import "github.com/templatedop/temporal/patterns/child"
+
+// Process 100 documents in parallel with concurrency control
+fanout := child.NewFanOutFanIn[string, string](VerifyDocumentWorkflow).
+    WithConcurrency(10).
+    WithErrorHandling(child.ContinueOnError).
+    Build()
+
+result, err := fanout.Execute(ctx, documents)
+fmt.Printf("Processed: %d/%d successful\n", result.Successful, len(documents))
+```
+
+### Continue-As-New for Long-Running Workflows
+
+```go
+import "github.com/templatedop/temporal/continueasnew"
+
+// Run weekly for a full year without history size issues
+periodic := continueasnew.NewPeriodicWorkflow[ReviewState](
+    AnnualReviewWorkflow,
+    7*24*3600, // Weekly intervals
+).WithMaxRuns(52) // 52 weeks
+
+state := continueasnew.PeriodicState[ReviewState]{
+    State: ReviewState{EmployeeID: "EMP-123"},
+}
+
+result, err := periodic.RunPeriodic(ctx, state, processReviewTask)
+```
+
+### Workflow Updates (Real-Time Updates)
+
+```go
+import "github.com/templatedop/temporal/updates"
+
+// Inside workflow: Register update handler
+err := updates.Register[ClaimUpdate, string](ctx, "updateClaimStatus",
+    func(ctx workflow.Context, update ClaimUpdate) (string, error) {
+        claim.Status = update.NewStatus
+        claim.LastUpdated = workflow.Now(ctx)
+        return "Updated successfully", nil
+    })
+
+// From client: Send update
+result, err := updates.ExecuteUpdate[ClaimUpdate, string](
+    ctx, client, workflowID, "", "updateClaimStatus",
+    ClaimUpdate{NewStatus: "approved"})
+```
+
+### Versioning (Safe Workflow Evolution)
+
+```go
+import "go.temporal.io/sdk/workflow"
+
+// Safe evolution from V1 to V2
+version := workflow.GetVersion(ctx, "process-v2", workflow.DefaultVersion, 2)
+if version == 2 {
+    // New enhanced processing
+    result = processV2(ctx, data)
+} else {
+    // Legacy processing for old workflows
+    result = processV1(ctx, data)
+}
 ```
 
 ## Why Use This Library?

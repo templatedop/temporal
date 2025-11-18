@@ -79,6 +79,14 @@ func (c *Client) Underlying() client.Client {
 	return c.underlying
 }
 
+// Namespace returns the namespace configured for this client
+func (c *Client) Namespace() string {
+	if c.config != nil {
+		return c.config.Namespace
+	}
+	return "default"
+}
+
 // GetConfig returns the client configuration
 func (c *Client) GetConfig() *Config {
 	return c.config

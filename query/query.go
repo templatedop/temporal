@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"go.temporal.io/sdk/client"
+	"go.temporal.io/api/workflowservice/v1"
 
 	temporalclient "github.com/templatedop/temporal/client"
 )
@@ -112,7 +112,8 @@ func (qb *QueryBuilder) Execute(ctx context.Context) (*WorkflowQueryResult, erro
 		token = qb.pageToken.Token
 	}
 
-	resp, err := qb.client.Underlying().ListWorkflow(ctx, &client.ListWorkflowExecutionsRequest{
+	resp, err := qb.client.Underlying().ListWorkflow(ctx, &workflowservice.ListWorkflowExecutionsRequest{
+		Namespace:     qb.client.Namespace(),
 		PageSize:      int32(qb.pageSize),
 		NextPageToken: token,
 		Query:         query,
@@ -137,11 +138,17 @@ func (qb *QueryBuilder) Execute(ctx context.Context) (*WorkflowQueryResult, erro
 			WorkflowID:   exec.Execution.WorkflowId,
 			RunID:        exec.Execution.RunId,
 			WorkflowType: exec.Type.Name,
-			StartTime:    *exec.StartTime,
+		}
+
+		// Convert protobuf timestamp to time.Time
+		if exec.StartTime != nil {
+			startTime := exec.StartTime.AsTime()
+			info.StartTime = startTime
 		}
 
 		if exec.CloseTime != nil {
-			info.CloseTime = exec.CloseTime
+			closeTime := exec.CloseTime.AsTime()
+			info.CloseTime = &closeTime
 		}
 
 		if exec.Status != 0 {
