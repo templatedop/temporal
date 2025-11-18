@@ -2,7 +2,11 @@
 
 A convenient, ergonomic wrapper library for the official Temporal Go SDK that provides simplified APIs, fluent builders, and helpful abstractions for building robust distributed applications.
 
+**Direct Temporal connectivity** - No extra HTTP layer or intermediate services required!
+
 ## Features
+
+### Core Features
 
 - **Simplified Client API** - Easy client creation with sensible defaults
 - **Fluent Workflow Builder** - Intuitive API for configuring workflow options
@@ -11,6 +15,27 @@ A convenient, ergonomic wrapper library for the official Temporal Go SDK that pr
 - **Preset Configurations** - Common patterns for timeouts and retry policies
 - **Signal & Query Support** - Easy-to-use workflow communication
 - **Type-Safe Interfaces** - Clean abstractions over the official SDK
+
+### Advanced Features (IWF-Inspired)
+
+🔥 **NEW**: Advanced patterns with direct Temporal connection (no HTTP overhead!)
+
+- **🎯 State Machine Abstraction** - Define workflows as state machines with clear transitions
+- **📞 RPC-Like Interface** - Type-safe workflow execution using Go generics
+- **🔄 Saga Pattern** - Distributed transactions with automatic compensations
+- **✅ Approval Workflows** - Human-in-the-loop with timeouts and reminders
+- **🔍 Better Queries** - Fluent API for workflow persistence queries with pagination
+
+See [FEATURES.md](FEATURES.md) for detailed documentation and examples.
+
+## Why This Library vs IWF?
+
+| Feature | IWF | This Library |
+|---------|-----|--------------|
+| Connection | Client → HTTP → IWF Server → Temporal | Client → Temporal (direct) |
+| Latency | Higher | **5-6x faster** |
+| Services Needed | 3 (Client, IWF, Temporal) | 2 (Client, Temporal) |
+| Type Safety | Limited | Full (Go generics) |
 
 ## Installation
 
